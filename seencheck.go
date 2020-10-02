@@ -8,11 +8,12 @@ import (
 )
 
 type Seencheck struct {
-	Mutex     *sync.Mutex
-	SeenRate  *ratecounter.RateCounter
-	SeenCount *ratecounter.Counter
-	SeenDB    leveldb.Store
-	WriteChan chan *Project
+	Mutex            *sync.Mutex
+	SeenRate         *ratecounter.RateCounter
+	SeenCount        *ratecounter.Counter
+	RateLimitedCount *ratecounter.Counter
+	SeenDB           leveldb.Store
+	WriteChan        chan *Project
 }
 
 func (seencheck *Seencheck) IsSeen(ID string) bool {

@@ -16,6 +16,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var seencheck = new(Seencheck)
+
 func testID(ID string) *Project {
 	var newItem = new(Project)
 
@@ -58,6 +60,7 @@ func testID(ID string) *Project {
 
 		// If we are being rate limited, retry
 		if resp.StatusCode == 429 {
+			seencheck.RateLimitedCount.Incr(1)
 			return testID(ID)
 		}
 
@@ -81,13 +84,13 @@ func testID(ID string) *Project {
 func main() {
 	argumentParsing(os.Args)
 
-	var seencheck = new(Seencheck)
 	var wg = sizedwaitgroup.New(arguments.Concurrency)
 	var err error
 
 	seencheck.Mutex = new(sync.Mutex)
 	seencheck.SeenRate = ratecounter.NewRateCounter(1 * time.Second)
 	seencheck.SeenCount = new(ratecounter.Counter)
+	seencheck.RateLimitedCount = new(ratecounter.Counter)
 	seencheck.WriteChan = make(chan *Project)
 
 	seencheck.SeenCount.Incr(linesInFile("./IDs.txt"))
@@ -139,11 +142,12 @@ func main() {
 
 			seencheck.Seen(item)
 			logrus.WithFields(logrus.Fields{
-				"id":         ID,
-				"username":   item.Author.Username,
-				"userID":     item.Author.ID,
-				"id/s":       seencheck.SeenRate.Rate(),
-				"totalFound": seencheck.SeenCount.Value(),
+				"id":           ID,
+				"username":     item.Author.Username,
+				"userID":       item.Author.ID,
+				"id/s":         seencheck.SeenRate.Rate(),
+				"totalFound":   seencheck.SeenCount.Value(),
+				"rateLimitHit": seencheck.RateLimitedCount.Value(),
 			}).Info("New ID found")
 		}(strconv.Itoa(ID), &wg)
 	}
