@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/paulbellamy/ratecounter"
 	"github.com/philippgille/gokv/leveldb"
@@ -14,7 +15,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func testID(ID string) bool {
+type Item struct {
+	Exist bool
+	ID    string
+	User  string
+}
+
+func testID(ID string) *Item {
+	var newItem = new(Item)
+	newItem.ID = ID
+
 	proxyClient := resty.New()
 	proxyClient.SetProxy("socks5://" + arguments.Proxy)
 
@@ -48,11 +58,32 @@ func testID(ID string) bool {
 
 	if resp.StatusCode != 200 {
 		resp.Body.Close()
-		return false
+
+		// If we are being rate limited, retry
+		if resp.StatusCode == 429 {
+			return testID(ID)
+		}
+
+		newItem.Exist = false
+		return newItem
 	}
 
+	// We parse the username and fill the structure
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"id":    ID,
+			"error": err,
+		}).Debug("Response parsing failed, retrying..")
+		resp.Body.Close()
+		return testID(ID)
+	}
 	resp.Body.Close()
-	return true
+
+	newItem.Exist = true
+	newItem.User = doc.Find("#view > div > div.inner > div.flex-row.preview-row.force-row > div.flex-row.project-header > div > a").Text()
+
+	return newItem
 }
 
 func main() {
@@ -65,7 +96,7 @@ func main() {
 	seencheck.Mutex = new(sync.Mutex)
 	seencheck.SeenRate = ratecounter.NewRateCounter(1 * time.Second)
 	seencheck.SeenCount = new(ratecounter.Counter)
-	seencheck.WriteChan = make(chan string)
+	seencheck.WriteChan = make(chan *Item)
 
 	seencheck.SeenCount.Incr(linesInFile("./IDs.txt"))
 
@@ -76,30 +107,37 @@ func main() {
 	defer seencheck.SeenDB.Close()
 
 	go func() {
-		f, err := os.OpenFile("IDs.txt",
-			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			logrus.Fatal(err)
-		}
-		defer f.Close()
+		os.MkdirAll(arguments.OutputDir, os.ModePerm)
 
-		for line := range seencheck.WriteChan {
-			if _, err := f.WriteString(line + "\n"); err != nil {
+		for item := range seencheck.WriteChan {
+			f, err := os.OpenFile(item.User+".txt",
+				os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+
+			if _, err := f.WriteString(item.ID + "\n"); err != nil {
 				logrus.Warning(err)
 			}
+
+			f.Close()
 		}
 	}()
 
 	logrus.Info("Starting IDs discovery..")
 	for ID := 0; ID <= 5000000000; ID++ {
+		if seencheck.IsSeen(strconv.Itoa(ID)) {
+			continue
+		}
+
 		wg.Add()
 		go func(ID string, wg *sizedwaitgroup.SizedWaitGroup) {
 			defer wg.Done()
 
-			if testID(ID) == true {
-				if seencheck.IsSeen(ID) == false {
-					seencheck.Seen(ID)
-				}
+			item := testID(ID)
+
+			if item.Exist == true {
+				seencheck.Seen(item)
 
 				logrus.WithFields(logrus.Fields{
 					"id":         ID,
