@@ -12,7 +12,7 @@ type Seencheck struct {
 	SeenRate  *ratecounter.RateCounter
 	SeenCount *ratecounter.Counter
 	SeenDB    leveldb.Store
-	WriteChan chan *Item
+	WriteChan chan *Project
 }
 
 func (seencheck *Seencheck) IsSeen(ID string) bool {
@@ -30,8 +30,7 @@ func (seencheck *Seencheck) IsSeen(ID string) bool {
 	return true
 }
 
-func (seencheck *Seencheck) Seen(item *Item) {
-	seencheck.SeenDB.Set(item.ID, true)
+func (seencheck *Seencheck) Seen(item *Project) {
 	seencheck.WriteChan <- item
 	seencheck.SeenCount.Incr(1)
 	seencheck.SeenRate.Incr(1)

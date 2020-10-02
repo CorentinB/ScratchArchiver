@@ -1,13 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
 	"github.com/paulbellamy/ratecounter"
 	"github.com/philippgille/gokv/leveldb"
@@ -15,15 +16,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Item struct {
-	Exist bool
-	ID    string
-	User  string
-}
-
-func testID(ID string) *Item {
-	var newItem = new(Item)
-	newItem.ID = ID
+func testID(ID string) *Project {
+	var newItem = new(Project)
 
 	proxyClient := resty.New()
 	proxyClient.SetProxy("socks5://" + arguments.Proxy)
@@ -64,24 +58,19 @@ func testID(ID string) *Item {
 			return testID(ID)
 		}
 
-		newItem.Exist = false
 		return newItem
 	}
 
-	// We parse the username and fill the structure
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	err = json.NewDecoder(resp.Body).Decode(&newItem)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"id":    ID,
 			"error": err,
-		}).Debug("Response parsing failed, retrying..")
+		}).Warning("Response decoding failed, retrying..")
 		resp.Body.Close()
 		return testID(ID)
 	}
 	resp.Body.Close()
-
-	newItem.Exist = true
-	newItem.User = doc.Find("#view > div > div.inner > div.flex-row.preview-row.force-row > div.flex-row.project-header > div > a").Text()
 
 	return newItem
 }
@@ -96,7 +85,7 @@ func main() {
 	seencheck.Mutex = new(sync.Mutex)
 	seencheck.SeenRate = ratecounter.NewRateCounter(1 * time.Second)
 	seencheck.SeenCount = new(ratecounter.Counter)
-	seencheck.WriteChan = make(chan *Item)
+	seencheck.WriteChan = make(chan *Project)
 
 	seencheck.SeenCount.Incr(linesInFile("./IDs.txt"))
 
@@ -110,13 +99,14 @@ func main() {
 		os.MkdirAll(arguments.OutputDir, os.ModePerm)
 
 		for item := range seencheck.WriteChan {
-			f, err := os.OpenFile(item.User+".txt",
+			os.MkdirAll(path.Join(arguments.OutputDir, item.Author.Username[:1]), os.ModePerm)
+			f, err := os.OpenFile(path.Join(arguments.OutputDir, item.Author.Username[:1], item.Author.Username+".txt"),
 				os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				logrus.Fatal(err)
 			}
 
-			if _, err := f.WriteString(item.ID + "\n"); err != nil {
+			if _, err := f.WriteString(strconv.Itoa(item.ID) + "\n"); err != nil {
 				logrus.Warning(err)
 			}
 
@@ -136,15 +126,22 @@ func main() {
 
 			item := testID(ID)
 
-			if item.Exist == true {
-				seencheck.Seen(item)
+			seencheck.SeenDB.Set(strconv.Itoa(item.ID), true)
 
-				logrus.WithFields(logrus.Fields{
-					"id":         ID,
-					"id/s":       seencheck.SeenRate.Rate(),
-					"totalFound": seencheck.SeenCount.Value(),
-				}).Info("New ID found")
+			// If the author ID didn't change, it means that the project
+			// doesn't exist.
+			if item.Author.ID == 0 {
+				return
 			}
+
+			seencheck.Seen(item)
+			logrus.WithFields(logrus.Fields{
+				"id":         ID,
+				"username":   item.Author.Username,
+				"userID":     item.Author.ID,
+				"id/s":       seencheck.SeenRate.Rate(),
+				"totalFound": seencheck.SeenCount.Value(),
+			}).Info("New ID found")
 		}(strconv.Itoa(ID), &wg)
 	}
 }
