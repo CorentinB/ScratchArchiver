@@ -16,6 +16,7 @@ var arguments = struct {
 }{
 	// Default arguments
 	Concurrency: 4,
+	Proxy:       "",
 }
 
 func argumentParsing(args []string) {
@@ -26,7 +27,7 @@ func argumentParsing(args []string) {
 		Required: true,
 		Help:     "Output directory"})
 	proxy := parser.String("p", "proxy", &argparse.Options{
-		Required: true,
+		Required: false,
 		Help:     "Proxy"})
 	concurrency := parser.Int("w", "workers", &argparse.Options{
 		Required: false,

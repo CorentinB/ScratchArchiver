@@ -20,7 +20,10 @@ func testID(ID string) *Project {
 	var newItem = new(Project)
 
 	proxyClient := resty.New()
-	proxyClient.SetProxy("socks5://" + arguments.Proxy)
+
+	if len(arguments.Proxy) != 0 {
+		proxyClient.SetProxy("socks5://" + arguments.Proxy)
+	}
 
 	req, err := http.NewRequest("GET", "https://api.scratch.mit.edu/projects/"+ID, nil)
 	if err != nil {
