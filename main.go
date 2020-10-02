@@ -105,18 +105,20 @@ func main() {
 		os.MkdirAll(arguments.OutputDir, os.ModePerm)
 
 		for item := range seencheck.WriteChan {
-			os.MkdirAll(path.Join(arguments.OutputDir, item.Author.Username[:1]), os.ModePerm)
-			f, err := os.OpenFile(path.Join(arguments.OutputDir, item.Author.Username[:1], item.Author.Username+".txt"),
-				os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				logrus.Fatal(err)
-			}
+			func() {
+				os.MkdirAll(path.Join(arguments.OutputDir, item.Author.Username[:1]), os.ModePerm)
 
-			if _, err := f.WriteString(strconv.Itoa(item.ID) + "\n"); err != nil {
-				logrus.Warning(err)
-			}
+				f, err := os.OpenFile(path.Join(arguments.OutputDir, item.Author.Username[:1], item.Author.Username+".txt"),
+					os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					logrus.Fatal(err)
+				}
+				defer f.Close()
 
-			f.Close()
+				if _, err := f.WriteString(strconv.Itoa(item.ID) + "\n"); err != nil {
+					logrus.Warning(err)
+				}
+			}()
 		}
 	}()
 
